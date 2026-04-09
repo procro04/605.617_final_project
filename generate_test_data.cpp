@@ -1,26 +1,23 @@
-/**
- * generate_test_data.cpp
- *
- * Generates synthetic LIDAR scan data for testing the occupancy map pipeline.
- * Simulates a robot at the origin surrounded by rectangular walls, rotating
- * a 180-degree LIDAR sweep.
- *
- * Output format (one scan per line):
- *   x_robot  y_robot  theta  x1 y1  x2 y2  ...  xN yN
- *
- * Build:  g++ -O2 -std=c++17 -o generate_test_data generate_test_data.cpp
- * Usage:  ./generate_test_data > test_lidar.txt
- */
+// Generates synthetic LIDAR scan data for testing the occupancy map pipeline.
+// Simulates a robot at the origin surrounded by rectangular walls, rotating
+// a 180-degree LIDAR sweep.
+//
+// Output format (one scan per line):
+// x_robot  y_robot  theta  x1 y1  x2 y2  ...  xN yN
+//
+// Usage:  ./generate_test_data > test_lidar.txt
+
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
+#include <iostream>
 
 struct Wall {
     float x0, y0, x1, y1;  // line segment endpoints
 };
 
-/// Ray-segment intersection. Returns distance t along the ray, or -1.
+// Ray-segment intersection. Returns distance t along the ray, or -1.
 float ray_segment_intersect(float ox, float oy, float dx, float dy,
                             float sx0, float sy0, float sx1, float sy1) {
     float ex = sx1 - sx0, ey = sy1 - sy0;
@@ -59,7 +56,7 @@ int main() {
         float ry = 1.0f * std::sin(frac * 2.0f * M_PI);
         float rtheta = frac * 2.0f * M_PI;
 
-        std::printf("%.4f %.4f %.4f", rx, ry, rtheta);
+        std::cout << " " << rx << " " << ry << " " << rtheta;
 
         for (int b = 0; b < num_beams; ++b) {
             float angle = rtheta + (static_cast<float>(b) / num_beams - 0.5f) * M_PI;
@@ -75,10 +72,9 @@ int main() {
 
             float hx = rx + dx * best_t;
             float hy = ry + dy * best_t;
-            std::printf(" %.4f %.4f", hx, hy);
+            std::cout << " " << hx << " " << hy;
         }
-
-        std::printf("\n");
+        std::cout << std::endl;
     }
 
     return 0;

@@ -12,8 +12,6 @@ Produces a 3-panel figure:
 
 Usage:
     python3 visualize_map.py <lidar_data.txt> <occupancy.pgm> [--save output.png]
-
-Dependencies: numpy, matplotlib (both common; pip install matplotlib if needed)
 """
 
 import argparse
@@ -24,7 +22,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 
-# ── PGM reader ───────────────────────────────────────────────────────────────
+# PGM reader ───────────────────────────────────────────────────────────────
 
 def load_pgm(filepath: str) -> np.ndarray:
     """Load a P5 (binary) PGM file and return it as a 2D uint8 array."""
@@ -47,7 +45,7 @@ def load_pgm(filepath: str) -> np.ndarray:
         return data.reshape((height, width))
 
 
-# ── LIDAR data reader ────────────────────────────────────────────────────────
+# LIDAR data reader ────────────────────────────────────────────────────────
 
 def load_lidar(filepath: str):
     """
@@ -79,7 +77,7 @@ def load_lidar(filepath: str):
             np.array(hit_x),   np.array(hit_y))
 
 
-# ── Plotting ─────────────────────────────────────────────────────────────────
+# Plotting ─────────────────────────────────────────────────────────────────
 
 def make_figure(lidar_path: str, pgm_path: str):
     robot_x, robot_y, hit_x, hit_y = load_lidar(lidar_path)
@@ -94,7 +92,7 @@ def make_figure(lidar_path: str, pgm_path: str):
     y_min, y_max = all_y.min() - margin, all_y.max() + margin
 
     # Build a 3-color colormap for the PGM: black=occupied, white=free, gray=unknown
-    # PGM values: 0 → occupied, 128 → unknown, 255 → free
+    # PGM values: 0 -> occupied, 128 -> unknown, 255 -> free
     grid_cmap = ListedColormap(["black", "gray", "white"])
     # Bin the PGM into 3 levels
     pgm_binned = np.zeros_like(pgm, dtype=np.uint8)
@@ -102,10 +100,10 @@ def make_figure(lidar_path: str, pgm_path: str):
     pgm_binned[pgm == 128] = 1   # unknown
     pgm_binned[pgm == 255] = 2   # free
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    fig, axes = plt.subplots(1, 2, figsize=(18, 6))
     fig.suptitle("Occupancy Map Verification", fontsize=14, fontweight="bold")
 
-    # ── Panel 1: Raw LIDAR data ──
+    # Panel 1: Raw LIDAR data
     ax = axes[0]
     ax.set_title("Raw LIDAR Input")
     ax.scatter(hit_x, hit_y, s=0.3, c="red", alpha=0.4, label="Hits")
@@ -118,24 +116,11 @@ def make_figure(lidar_path: str, pgm_path: str):
     ax.set_xlabel("x (m)")
     ax.set_ylabel("y (m)")
 
-    # ── Panel 2: PGM occupancy grid ──
+    # Panel 2: PGM occupancy grid ──
     ax = axes[1]
     ax.set_title("Occupancy Grid (PGM)")
     ax.imshow(pgm_binned, cmap=grid_cmap, origin="upper",
               extent=[x_min, x_max, y_min, y_max])
-    ax.set_aspect("equal")
-    ax.set_xlabel("x (m)")
-
-    # ── Panel 3: Composite overlay ──
-    ax = axes[2]
-    ax.set_title("Overlay (Hits on Grid)")
-    ax.imshow(pgm_binned, cmap=grid_cmap, origin="upper",
-              extent=[x_min, x_max, y_min, y_max], alpha=0.6)
-    ax.scatter(hit_x, hit_y, s=0.3, c="red", alpha=0.5)
-    ax.plot(robot_x, robot_y, "-o", color="cyan", markersize=3,
-            linewidth=1, alpha=0.8)
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(y_min, y_max)
     ax.set_aspect("equal")
     ax.set_xlabel("x (m)")
 
