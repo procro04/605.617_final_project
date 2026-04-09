@@ -41,39 +41,18 @@
 // ---------------------------------------------------------------------------
 
 // Wrap every CUDA API call with this to catch errors early.
-#define CUDA_CHECK(call)                                                    \
-    do {                                                                    \
-        cudaError_t err = (call);                                           \
-        if (err != cudaSuccess) {                                           \
-            std::cerr << "CUDA error in " << __FILE__ << ":" << __LINE__   \
-                      << " -- " << cudaGetErrorString(err) << "\n";        \
-            exit(EXIT_FAILURE);                                             \
-        }                                                                   \
+#define CUDA_CHECK(call)                                                 \
+    do                                                                   \
+    {                                                                    \
+        cudaError_t err = (call);                                        \
+        if (err != cudaSuccess)                                          \
+        {                                                                \
+            std::cerr << "CUDA error in " << __FILE__ << ":" << __LINE__ \
+                      << " -- " << cudaGetErrorString(err) << "\n";      \
+            exit(EXIT_FAILURE);                                          \
+        }                                                                \
     } while (0)
 
-// ---------------------------------------------------------------------------
-// Timing Report Helper
-// ---------------------------------------------------------------------------
-// Prints a label and elapsed time in aligned columns to both an ostream
-// and std::cout. Replaces the old snprintf + char buf approach.
-static void print_timing_line(std::ostream &rpt,
-                              const std::string &label, double ms)
-{
-    auto flags = std::cout.flags();
-    auto prec  = std::cout.precision();
-
-    std::cout << std::left << std::setw(35) << label
-              << " " << std::right << std::setw(10)
-              << std::fixed << std::setprecision(3) << ms << " ms\n";
-
-    rpt << std::left << std::setw(35) << label
-        << " " << std::right << std::setw(10)
-        << std::fixed << std::setprecision(3) << ms << " ms\n";
-
-    // Restore original format state so callers are not surprised.
-    std::cout.flags(flags);
-    std::cout.precision(prec);
-}
 
 // Parse the Intel Research Lab LIDAR dataset.
 // Expected line format:  x_robot  y_robot  theta  x1 y1  x2 y2
@@ -285,7 +264,7 @@ public:
         if (num_hits == 0)
             return;
 
-        // -- Pack hit coordinates into flat arrays for the GPU -----------
+        // Pack hit coordinates into flat arrays for the GPU
         std::vector<float> hits_x(num_hits);
         std::vector<float> hits_y(num_hits);
         for (int i = 0; i < num_hits; ++i)

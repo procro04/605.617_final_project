@@ -14,8 +14,8 @@ enum CellState : int8_t
     OCCUPIED = 1
 };
 
-// Block size for the endpoint-marking kernel. 256 is a reasonable default
-// that keeps occupancy high on most GPUs without excessive register pressure.
+// Block size for the endpoint-marking kernel. Can play around with values but
+// 256 is reasonable
 static const int BLOCK_SIZE = 256;
 
 // ---------------------------------------------------------------------------

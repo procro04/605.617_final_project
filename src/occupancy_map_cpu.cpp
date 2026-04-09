@@ -392,48 +392,42 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Write timing report ------------------------------------------------
+    // Write timing report
+    std::ofstream rpt("timing_report.txt");
+    rpt << "=== Occupancy Map CPU Timing Report ===\n\n";
+    rpt << "Grid: " << grid.num_cells() << " x " << grid.num_cells()
+        << "  resolution=" << grid.resolution() << " m\n";
+    rpt << "Scans processed: " << scans.size() << "\n\n";
+
+    // Print summary totals first
+    double total_scan_ms = 0.0;
+    for (const auto &r : timing_log)
     {
-        std::ofstream rpt("timing_report.txt");
-        rpt << "=== Occupancy Map CPU Timing Report ===\n\n";
-        rpt << "Grid: " << grid.num_cells() << " x " << grid.num_cells()
-            << "  resolution=" << grid.resolution() << " m\n";
-        rpt << "Scans processed: " << scans.size() << "\n\n";
-
-        // Print summary totals first
-        double total_scan_ms = 0.0;
-        for (const auto &r : timing_log)
-        {
-            if (r.label.rfind("Scan #", 0) == 0)
-                total_scan_ms += r.elapsed_ms;
-        }
-
-        for (const auto &r : timing_log)
-        {
-            // Only print aggregate records and non-per-scan records
-            if (r.label.rfind("Scan #", 0) != 0)
-            {
-                char buf[128];
-                std::snprintf(buf, sizeof(buf), "%-35s %10.3f ms\n",
-                              r.label.c_str(), r.elapsed_ms);
-                rpt << buf;
-                std::cout << buf;
-            }
-        }
-
-        // Per-scan average
-        if (!scans.empty())
-        {
-            double avg = total_scan_ms / scans.size();
-            char buf[128];
-            std::snprintf(buf, sizeof(buf), "%-35s %10.3f ms\n",
-                          "Average per scan", avg);
-            rpt << buf;
-            std::cout << buf;
-        }
-
-        std::cout << "\nFull timing log: timing_report.txt\n";
+        if (r.label.rfind("Scan #", 0) == 0)
+            total_scan_ms += r.elapsed_ms;
     }
+
+    // Print high-level timings first.
+    for (const auto &r : timing_log)
+    {
+        // Only print aggregate records and non-per-scan, non-substep records.
+        if (r.label.rfind("Scan #", 0) != 0 &&
+            r.label.rfind("  ", 0) != 0)
+        {
+            print_timing_line(rpt, r.label, r.elapsed_ms);
+        }
+    }
+
+    // Per-scan average.
+    if (!scans.empty())
+    {
+        double avg = total_scan_ms / scans.size();
+        std::cout << "\n";
+        rpt << "\n";
+        print_timing_line(rpt, "Average per scan", avg);
+    }
+
+    std::cout << "\nFull timing log: timing_report.txt\n";
 
     return 0;
 }

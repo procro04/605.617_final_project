@@ -4,7 +4,33 @@
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+#include <iostream>
+#include <sstream>
+#include <iomanip>
 
+// ---------------------------------------------------------------------------
+// Timing Report Helper
+// ---------------------------------------------------------------------------
+// Prints a label and elapsed time in aligned columns to both an ostream
+// and std::cout. Replaces the old snprintf + char buf approach.
+static inline void print_timing_line(std::ostream &rpt,
+                              const std::string &label, double ms)
+{
+    auto flags = std::cout.flags();
+    auto prec = std::cout.precision();
+
+    std::cout << std::left << std::setw(35) << label
+              << " " << std::right << std::setw(10)
+              << std::fixed << std::setprecision(3) << ms << " ms\n";
+
+    rpt << std::left << std::setw(35) << label
+        << " " << std::right << std::setw(10)
+        << std::fixed << std::setprecision(3) << ms << " ms\n";
+
+    // Restore original format state so callers are not surprised.
+    std::cout.flags(flags);
+    std::cout.precision(prec);
+}
 
 struct TimingRecord {
     std::string label;
