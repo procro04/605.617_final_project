@@ -1,6 +1,13 @@
 # 605.617_final_project
 Final Project For GPU Programming Course. GPU accelerated occupancy map.
 
+# Folder Layout
+- `inc/` - include files
+- `reference_code/` - my reference python code from my robotics class. These files
+provide the base of the algorithm to convert to C++/CUDA.
+- `src/` - cpp source files
+- `scripts/` - any useful scripts for debugging, visualization, etc
+
 # Build
 - CMakeLists.txt should do everything. You may need to find and specify your
 particular platform. My GPU works with 75.
