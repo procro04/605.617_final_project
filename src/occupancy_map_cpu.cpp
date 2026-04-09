@@ -162,9 +162,9 @@ public:
         return UNKNOWN;
     }
 
-    // -- Core Update Functions -----------------------------------------------
-    //    These are written as free-standing-style logic on raw pointers so
-    //    they translate directly to CUDA kernels later.
+    // Core Update Functions
+    // These are written as free-standing-style logic on raw pointers so
+    // they translate directly to CUDA kernels later.
 
     // Mark a single cell as OCCUPIED (the endpoint of a ray).
     void point_update(float wx, float wy, CellState state)
@@ -191,7 +191,7 @@ public:
         if (!world_to_grid(hx, hy, c1, r1))
             return;
 
-        // --- Bresenham line from (c0,r0) to (c1,r1) ---
+        // Bresenham line from (c0,r0) to (c1,r1)
         bresenham_ray(cells_.data(), num_cells_, c0, r0, c1, r1);
     }
 
@@ -249,7 +249,7 @@ private:
     // cudaMemcpy'd to the device in the CUDA version.
     std::vector<int8_t> cells_;
 
-    // -- Bresenham (static so it can become a __device__ function) ----------
+    // Bresenham (static so it can become a __device__ function)
 
     // Bresenham line rasterization.  Marks every cell along the ray as
     // UNOCCUPIED, then marks the final cell (c1, r1) as OCCUPIED.
