@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 
-# PGM reader ───────────────────────────────────────────────────────────────
+# PGM reader
 
 def load_pgm(filepath: str) -> np.ndarray:
     """Load a P5 (binary) PGM file and return it as a 2D uint8 array."""
@@ -45,7 +45,7 @@ def load_pgm(filepath: str) -> np.ndarray:
         return data.reshape((height, width))
 
 
-# LIDAR data reader ────────────────────────────────────────────────────────
+# LIDAR data reader
 
 def load_lidar(filepath: str):
     """
@@ -77,7 +77,7 @@ def load_lidar(filepath: str):
             np.array(hit_x),   np.array(hit_y))
 
 
-# Plotting ─────────────────────────────────────────────────────────────────
+# Plotting
 
 def make_figure(lidar_path: str, pgm_path: str):
     robot_x, robot_y, hit_x, hit_y = load_lidar(lidar_path)
@@ -116,7 +116,7 @@ def make_figure(lidar_path: str, pgm_path: str):
     ax.set_xlabel("x (m)")
     ax.set_ylabel("y (m)")
 
-    # Panel 2: PGM occupancy grid ──
+    # Panel 2: PGM occupancy grid
     ax = axes[1]
     ax.set_title("Occupancy Grid (PGM)")
     ax.imshow(pgm_binned, cmap=grid_cmap, origin="upper",
@@ -126,9 +126,6 @@ def make_figure(lidar_path: str, pgm_path: str):
 
     plt.tight_layout()
     return fig
-
-
-# ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(

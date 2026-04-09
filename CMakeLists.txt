@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.18)
 project(occupancy_map LANGUAGES CXX)
 
-# ── Phase 1: CPU-only build ──────────────────────────────────────────────────
+# Phase 1: CPU-only build
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -12,16 +12,16 @@ target_compile_options(occupancy_map_cpu PRIVATE -O2 -Wall -Wextra)
 add_executable(generate_test_data generate_test_data.cpp)
 target_compile_options(generate_test_data PRIVATE -O2)
 
-# ── Phase 2: CUDA build (uncomment when ready) ──────────────────────────────
-# enable_language(CUDA)
-# set(CMAKE_CUDA_STANDARD 17)
-#
-# add_executable(occupancy_map_gpu occupancy_map_gpu.cu)
-# target_compile_options(occupancy_map_gpu PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-#     --expt-relaxed-constexpr
-#     -O2
-# >)
-# set_target_properties(occupancy_map_gpu PROPERTIES
-#     CUDA_SEPARABLE_COMPILATION ON
-#     CUDA_ARCHITECTURES "61;70;75;80;86"   # Adjust for your GPU
-# )
+# Phase 2: CUDA build
+enable_language(CUDA)
+set(CMAKE_CUDA_STANDARD 17)
+
+add_executable(occupancy_map_cuda occupancy_map_cuda.cu)
+target_compile_options(occupancy_map_cuda PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+    --expt-relaxed-constexpr
+    -O2
+>)
+set_target_properties(occupancy_map_cuda PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON
+    CUDA_ARCHITECTURES "75"   # Adjust for your GPU
+)
