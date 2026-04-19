@@ -1,11 +1,13 @@
 // occupancy_map_cuda.cu
-// First-pass CUDA-accelerated occupancy grid mapping.
-// Strategy: Bresenham ray tracing stays on the CPU. The GPU handles
-// endpoint marking -- one thread per LIDAR hit writes OCCUPIED into the
-// grid. This avoids the need for atomics since each hit cell is written
-// with the same value (OCCUPIED) so write conflicts are benign.
-// After the GPU marks endpoints the CPU does ray tracing on the host
-// copy of the grid for the free-space (UNOCCUPIED) cells.
+// CUDA-accelerated occupancy grid mapping with full GPU ray tracing.
+// Strategy: Two back-to-back GPU kernels per scan.
+//   1) mark_endpoints_kernel  -- one thread per hit writes OCCUPIED.
+//      Concurrent same-value writes are benign; no atomics needed.
+//   2) ray_trace_kernel       -- one thread per hit runs Bresenham and
+//      writes UNOCCUPIED along the ray.  Concurrent rays can share cells,
+//      so we use a 4-byte atomicCAS trick to update int8_t cells safely:
+//      a cell is only changed from UNKNOWN to UNOCCUPIED, never from
+//      OCCUPIED to UNOCCUPIED, so previously-marked endpoints are preserved.
 //
 // Usage:
 //   ./occupancy_map_cuda <lidar_data.txt> [grid_size] [resolution]
@@ -53,7 +55,6 @@
         }                                                                \
     } while (0)
 
-
 // Parse the Intel Research Lab LIDAR dataset.
 // Expected line format:  x_robot  y_robot  theta  x1 y1  x2 y2
 // Lines starting with '#' are comments.
@@ -96,6 +97,38 @@ std::vector<LidarScan> load_lidar_dataset(const std::string &filepath)
 
     std::cout << "Loaded " << scans.size() << " scans from " << filepath << "\n";
     return scans;
+}
+
+// ---------------------------------------------------------------------------
+// Device helper: atomic write to an int8_t cell using 4-byte atomicCAS.
+// ---------------------------------------------------------------------------
+// int8_t has no native CUDA atomic, so we operate on the 4-byte word that
+// contains the target byte.  The cell is updated from UNKNOWN to `value`
+// only; if the cell is already OCCUPIED or UNOCCUPIED the write is skipped.
+// cudaMalloc guarantees at least 256-byte alignment, so the int* cast is safe.
+__device__ static void atomic_set_if_unknown(int8_t *d_grid, int idx, int8_t value)
+{
+    int byte_lane = idx & 3;
+    unsigned int shift = static_cast<unsigned int>(byte_lane) * 8u;
+    unsigned int byte_mask = 0xFFu << shift;
+    unsigned int *word_ptr = reinterpret_cast<unsigned int *>(d_grid) + (idx >> 2);
+
+    unsigned int old_word = *word_ptr;
+    while (true)
+    {
+        // Check whether the target byte is still UNKNOWN (0xFF when unsigned).
+        uint8_t cur = static_cast<uint8_t>((old_word >> shift) & 0xFFu);
+        if (cur != static_cast<uint8_t>(UNKNOWN))
+            break;
+
+        unsigned int new_word =
+            (old_word & ~byte_mask) |
+            (static_cast<unsigned int>(static_cast<uint8_t>(value)) << shift);
+        unsigned int prev = atomicCAS(word_ptr, old_word, new_word);
+        if (prev == old_word)
+            break;       // success
+        old_word = prev; // retry with the freshly read word
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -144,9 +177,82 @@ __global__ void mark_endpoints_kernel(int8_t *d_grid,
 }
 
 // ---------------------------------------------------------------------------
+// GPU Kernel: Bresenham Ray Tracing (free space)
+// ---------------------------------------------------------------------------
+// One thread per LIDAR hit.  Each thread walks the Bresenham line from the
+// robot position to (but not including) the hit endpoint and marks every
+// intermediate cell UNOCCUPIED using the atomic helper above.
+// Cells already set to OCCUPIED (by mark_endpoints_kernel or a prior scan)
+// are preserved because atomic_set_if_unknown only updates UNKNOWN cells.
+//
+// robot_x/y    -- world-frame robot position (scalar, shared by all rays)
+// d_hits_x/y   -- per-ray hit positions (world frame)
+// Uses code conventions from the wikipedia page:
+// https://en.wikipedia.org/wiki/Bresenham%27s_line_algorithm
+__global__ void ray_trace_kernel(int8_t *d_grid,
+                                 float robot_x,
+                                 float robot_y,
+                                 const float *d_hits_x,
+                                 const float *d_hits_y,
+                                 int num_hits,
+                                 int num_cells,
+                                 float resolution,
+                                 float origin_x,
+                                 float origin_y,
+                                 float grid_size)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= num_hits)
+        return;
+
+    float off_x = origin_x - grid_size / 2.0f;
+    float off_y = origin_y - grid_size / 2.0f;
+
+    // Start and end grid coordinates. column/row
+    int c0 = (int)floorf((robot_x - off_x) / resolution);
+    int r0 = (int)floorf((robot_y - off_y) / resolution);
+    int c1 = (int)floorf((d_hits_x[tid] - off_x) / resolution);
+    int r1 = (int)floorf((d_hits_y[tid] - off_y) / resolution);
+
+    // Skip rays whose origin or endpoint falls outside the grid.
+    if (c0 < 0 || c0 >= num_cells || r0 < 0 || r0 >= num_cells)
+        return;
+    if (c1 < 0 || c1 >= num_cells || r1 < 0 || r1 >= num_cells)
+        return;
+
+    // delta column/delta row
+    int dc = abs(c1 - c0);
+    int dr = abs(r1 - r0);
+    int sc = (c0 < c1) ? 1 : -1;
+    int sr = (r0 < r1) ? 1 : -1;
+    int err = dc - dr;
+    int c = c0, r = r0;
+
+    while (!(c == c1 && r == r1))
+    {
+        // Atomically mark the cell UNOCCUPIED only if it is still UNKNOWN.
+        // This preserves OCCUPIED endpoints from the first kernel and from
+        // previous scans.
+        atomic_set_if_unknown(d_grid, r * num_cells + c, (int8_t)UNOCCUPIED);
+
+        int e2 = 2 * err;
+        if (e2 > -dr)
+        {
+            err -= dr;
+            c += sc;
+        }
+        if (e2 < dc)
+        {
+            err += dc;
+            r += sr;
+        }
+    }
+    // (c1, r1) is already OCCUPIED -- do not touch it.
+}
+
+// ---------------------------------------------------------------------------
 // Occupancy Grid  (flat, CUDA-accelerated)
 // ---------------------------------------------------------------------------
-
 class OccupancyGrid
 {
 public:
@@ -230,33 +336,12 @@ public:
         }
     }
 
-    // Bresenham ray trace from robot position to hit point.
-    // Marks all cells along the ray as UNOCCUPIED. Does NOT mark the
-    // endpoint -- that is handled by the GPU kernel now.
-    //
-    // In this first CUDA pass the CPU is responsible for free-space
-    // ray tracing because concurrent Bresenham rays can cross the same
-    // cells which would require atomics on the GPU. That optimization
-    // comes in the next pass.
-    void ray_trace_free_space(float ox, float oy, float hx, float hy)
-    {
-        int c0, r0, c1, r1;
-        if (!world_to_grid(ox, oy, c0, r0))
-            return;
-        if (!world_to_grid(hx, hy, c1, r1))
-            return;
-
-        // Bresenham line from (c0,r0) to (c1,r1).
-        // Only marks intermediate cells as UNOCCUPIED -- stops before
-        // the endpoint so the GPU's OCCUPIED mark is not overwritten.
-        bresenham_free_space(cells_.data(), num_cells_, c0, r0, c1, r1);
-    }
-
-    // Process an entire LIDAR scan using the hybrid CPU/GPU approach.
-    // 1) Launch GPU kernel to mark all hit endpoints as OCCUPIED.
-    // 2) Sync the device grid back to host.
-    // 3) Run CPU Bresenham for each ray to mark free space.
-    // 4) Copy the updated host grid back to device for the next scan.
+    // Process an entire LIDAR scan entirely on the GPU.
+    // 1) Copy hit coordinates to the device.
+    // 2) Kernel 1: mark all endpoints OCCUPIED (no atomics needed).
+    // 3) Kernel 2: Bresenham ray trace for free space using atomicCAS.
+    // The device grid is NOT synced back to the host between scans; the
+    // host copy is only updated when sync_from_device() is called.
     void process_scan_cuda(const LidarScan &scan,
                            std::vector<TimingRecord> &timing_log)
     {
@@ -264,7 +349,7 @@ public:
         if (num_hits == 0)
             return;
 
-        // Pack hit coordinates into flat arrays for the GPU
+        // Pack hit coordinates into flat arrays for the GPU.
         std::vector<float> hits_x(num_hits);
         std::vector<float> hits_y(num_hits);
         for (int i = 0; i < num_hits; ++i)
@@ -273,7 +358,7 @@ public:
             hits_y[i] = scan.hits[i].second;
         }
 
-        // Allocate device hit arrays
+        // Allocate device hit arrays.
         float *d_hits_x = nullptr;
         float *d_hits_y = nullptr;
         size_t hits_bytes = num_hits * sizeof(float);
@@ -281,7 +366,7 @@ public:
         CUDA_CHECK(cudaMalloc(&d_hits_x, hits_bytes));
         CUDA_CHECK(cudaMalloc(&d_hits_y, hits_bytes));
 
-        // Copy hits to device
+        // Copy hits to device.
         {
             ScopedTimer t("  H2D hit data", timing_log);
             CUDA_CHECK(cudaMemcpy(d_hits_x, hits_x.data(), hits_bytes,
@@ -290,47 +375,44 @@ public:
                                   cudaMemcpyHostToDevice));
         }
 
-        // Launch endpoint-marking kernel
+        int num_blocks = (num_hits + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+        // Kernel 1: mark endpoints OCCUPIED.
         {
             ScopedTimer t("  GPU endpoint marking", timing_log);
-            int num_blocks = (num_hits + BLOCK_SIZE - 1) / BLOCK_SIZE;
             mark_endpoints_kernel<<<num_blocks, BLOCK_SIZE>>>(
                 d_grid_, d_hits_x, d_hits_y,
                 num_hits, num_cells_, resolution_,
                 origin_x_, origin_y_, grid_size_);
-
-            // Sync so the timer captures actual kernel execution time.
             CUDA_CHECK(cudaDeviceSynchronize());
         }
 
-        // Copy grid back from device so CPU can do ray tracing
+        // Kernel 2: Bresenham ray tracing -- mark free space UNOCCUPIED.
+        // Uses atomicCAS (via atomic_set_if_unknown) so concurrent rays that
+        // cross the same cell are handled safely, and OCCUPIED endpoints are
+        // never overwritten.
         {
-            ScopedTimer t("  D2H grid sync", timing_log);
-            size_t grid_bytes = static_cast<size_t>(num_cells_) * num_cells_ * sizeof(int8_t);
-            CUDA_CHECK(cudaMemcpy(cells_.data(), d_grid_, grid_bytes,
-                                  cudaMemcpyDeviceToHost));
+            ScopedTimer t("  GPU ray tracing", timing_log);
+            ray_trace_kernel<<<num_blocks, BLOCK_SIZE>>>(
+                d_grid_,
+                scan.pose.x, scan.pose.y,
+                d_hits_x, d_hits_y,
+                num_hits, num_cells_, resolution_,
+                origin_x_, origin_y_, grid_size_);
+            CUDA_CHECK(cudaDeviceSynchronize());
         }
 
-        // CPU Bresenham ray tracing for free space
-        {
-            ScopedTimer t("  CPU ray tracing", timing_log);
-            for (const auto &[hx, hy] : scan.hits)
-            {
-                ray_trace_free_space(scan.pose.x, scan.pose.y, hx, hy);
-            }
-        }
-
-        // Push updated grid back to device for next scan
-        {
-            ScopedTimer t("  H2D grid sync", timing_log);
-            size_t grid_bytes = static_cast<size_t>(num_cells_) * num_cells_ * sizeof(int8_t);
-            CUDA_CHECK(cudaMemcpy(d_grid_, cells_.data(), grid_bytes,
-                                  cudaMemcpyHostToDevice));
-        }
-
-        // Free per-scan device allocations
+        // Free per-scan device allocations.
         CUDA_CHECK(cudaFree(d_hits_x));
         CUDA_CHECK(cudaFree(d_hits_y));
+    }
+
+    // Copy the device grid back to the host (call once after all scans).
+    void sync_from_device()
+    {
+        size_t grid_bytes = static_cast<size_t>(num_cells_) * num_cells_ * sizeof(int8_t);
+        CUDA_CHECK(cudaMemcpy(cells_.data(), d_grid_, grid_bytes,
+                              cudaMemcpyDeviceToHost));
     }
 
     // Write the grid to a PGM (Portable Gray Map) image file.
@@ -377,53 +459,9 @@ private:
     // Flat, contiguous cell storage -- row-major. Host copy.
     std::vector<int8_t> cells_;
 
-    // Device copy of the grid. Kept in sync with cells_ across scans.
+    // Device copy of the grid. Persists across scans; synced to host only
+    // on demand via sync_from_device().
     int8_t *d_grid_;
-
-    // Bresenham (free-space only)
-
-    // Bresenham line rasterization for free space only.
-    // Marks every cell along the ray as UNOCCUPIED EXCEPT the final cell
-    // (c1, r1) which was already marked OCCUPIED by the GPU kernel.
-    //
-    // grid       Pointer to the flat grid array.
-    // width      Number of cells per row (grid is width x width).
-    // c0,r0      Start cell (robot position).
-    // c1,r1      End cell (LIDAR hit) -- not modified by this function.
-    static void bresenham_free_space(int8_t *grid, int width,
-                                     int c0, int r0, int c1, int r1)
-    {
-        int dc = std::abs(c1 - c0);
-        int dr = std::abs(r1 - r0);
-        int sc = (c0 < c1) ? 1 : -1;
-        int sr = (r0 < r1) ? 1 : -1;
-        int err = dc - dr;
-
-        int c = c0, r = r0;
-
-        while (true)
-        {
-            // Stop before marking the endpoint -- the GPU already wrote
-            // OCCUPIED there and we don't want to overwrite it.
-            if (c == c1 && r == r1)
-                break;
-
-            // All intermediate cells are free space.
-            grid[r * width + c] = UNOCCUPIED;
-
-            int e2 = 2 * err;
-            if (e2 > -dr)
-            {
-                err -= dr;
-                c += sc;
-            }
-            if (e2 < dc)
-            {
-                err += dc;
-                r += sr;
-            }
-        }
-    }
 };
 
 void print_cuda_device_info()
@@ -523,6 +561,12 @@ int main(int argc, char *argv[])
         }
     }
 
+    // Sync device grid to host once -- all scans are complete.
+    {
+        ScopedTimer t("D2H final grid sync", timing_log);
+        grid.sync_from_device();
+    }
+
     // Write final output
     {
         ScopedTimer t("Write PGM output", timing_log);
@@ -539,19 +583,17 @@ int main(int argc, char *argv[])
 
     // Write timing report
     {
-        std::ofstream rpt("timing_report.txt");
-        rpt << "=== Occupancy Map CUDA (Pass 1) Timing Report ===\n\n";
-        rpt << "Grid: " << grid.num_cells() << " x " << grid.num_cells()
+        std::ofstream timing_report("timing_report.txt");
+        timing_report << "=== Occupancy Map CUDA (Full GPU Ray Tracing) Timing Report ===\n\n";
+        timing_report << "Grid: " << grid.num_cells() << " x " << grid.num_cells()
             << "  resolution=" << grid.resolution() << " m\n";
-        rpt << "Scans processed: " << scans.size() << "\n\n";
+        timing_report << "Scans processed: " << scans.size() << "\n\n";
 
         // Accumulate per-stage totals across all scans for the breakdown.
         double total_scan_ms = 0.0;
         double total_h2d_hits_ms = 0.0;
         double total_gpu_mark_ms = 0.0;
-        double total_d2h_grid_ms = 0.0;
-        double total_cpu_ray_ms = 0.0;
-        double total_h2d_grid_ms = 0.0;
+        double total_gpu_ray_ms = 0.0;
 
         for (const auto &r : timing_log)
         {
@@ -561,12 +603,8 @@ int main(int argc, char *argv[])
                 total_h2d_hits_ms += r.elapsed_ms;
             else if (r.label == "  GPU endpoint marking")
                 total_gpu_mark_ms += r.elapsed_ms;
-            else if (r.label == "  D2H grid sync")
-                total_d2h_grid_ms += r.elapsed_ms;
-            else if (r.label == "  CPU ray tracing")
-                total_cpu_ray_ms += r.elapsed_ms;
-            else if (r.label == "  H2D grid sync")
-                total_h2d_grid_ms += r.elapsed_ms;
+            else if (r.label == "  GPU ray tracing")
+                total_gpu_ray_ms += r.elapsed_ms;
         }
 
         // Print high-level timings first.
@@ -576,27 +614,25 @@ int main(int argc, char *argv[])
             if (r.label.rfind("Scan #", 0) != 0 &&
                 r.label.rfind("  ", 0) != 0)
             {
-                print_timing_line(rpt, r.label, r.elapsed_ms);
+                print_timing_line(timing_report, r.label, r.elapsed_ms);
             }
         }
 
         // Print the per-stage breakdown totals.
         std::cout << "\n--- Per-stage totals (summed across all scans) ---\n";
-        rpt << "\n--- Per-stage totals (summed across all scans) ---\n";
+        timing_report << "\n--- Per-stage totals (summed across all scans) ---\n";
 
-        print_timing_line(rpt, "H2D hit data (total)", total_h2d_hits_ms);
-        print_timing_line(rpt, "GPU endpoint marking (total)", total_gpu_mark_ms);
-        print_timing_line(rpt, "D2H grid sync (total)", total_d2h_grid_ms);
-        print_timing_line(rpt, "CPU ray tracing (total)", total_cpu_ray_ms);
-        print_timing_line(rpt, "H2D grid sync (total)", total_h2d_grid_ms);
+        print_timing_line(timing_report, "H2D hit data (total)", total_h2d_hits_ms);
+        print_timing_line(timing_report, "GPU endpoint marking (total)", total_gpu_mark_ms);
+        print_timing_line(timing_report, "GPU ray tracing (total)", total_gpu_ray_ms);
 
         // Per-scan average.
         if (!scans.empty())
         {
             double avg = total_scan_ms / scans.size();
             std::cout << "\n";
-            rpt << "\n";
-            print_timing_line(rpt, "Average per scan", avg);
+            timing_report << "\n";
+            print_timing_line(timing_report, "Average per scan", avg);
         }
 
         std::cout << "\nFull timing log: timing_report.txt\n";
