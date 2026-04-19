@@ -79,31 +79,48 @@ def load_lidar(filepath: str):
 
 # Plotting
 
-def make_figure(lidar_path: str, pgm_path: str):
-    robot_x, robot_y, hit_x, hit_y = load_lidar(lidar_path)
-    pgm = load_pgm(pgm_path)
+def _bin_pgm(pgm: np.ndarray) -> np.ndarray:
+    """Map PGM pixel values (0=occupied, 128=unknown, 255=free) to 3-level array."""
+    binned = np.zeros_like(pgm, dtype=np.uint8)
+    binned[pgm == 128] = 1
+    binned[pgm == 255] = 2
+    return binned
 
-    # Compute world-coordinate extents from the LIDAR data so the two panels
-    # share the same spatial frame.
+
+def _pgm_extent_from_lidar(robot_x, robot_y, hit_x, hit_y, margin=2.0):
+    """Estimate world-coordinate extent of the PGM from LIDAR data + margin."""
     all_x = np.concatenate([robot_x, hit_x])
     all_y = np.concatenate([robot_y, hit_y])
-    margin = 2.0
-    x_min, x_max = all_x.min() - margin, all_x.max() + margin
-    y_min, y_max = all_y.min() - margin, all_y.max() + margin
+    return (all_x.min() - margin, all_x.max() + margin,
+            all_y.min() - margin, all_y.max() + margin)
 
-    # Build a 3-color colormap for the PGM: black=occupied, white=free, gray=unknown
-    # PGM values: 0 -> occupied, 128 -> unknown, 255 -> free
+
+def _pgm_extent_from_grid(pgm: np.ndarray, grid_origin_x: float,
+                           grid_origin_y: float, resolution: float):
+    """
+    Compute exact world-coordinate extent of a PGM given the grid's center
+    origin and cell resolution (metres/cell).
+
+    The OccupancyGrid is built so that (grid_origin_x, grid_origin_y) is the
+    centre of the grid.  The PGM is written row-major with row 0 at the top,
+    meaning row 0 corresponds to the *maximum* world-y edge of the grid.
+    """
+    height, width = pgm.shape
+    half_w = width  * resolution / 2.0
+    half_h = height * resolution / 2.0
+    x_min = grid_origin_x - half_w
+    x_max = grid_origin_x + half_w
+    # imshow origin="upper": row 0 → top of image → y_max in world coords
+    y_min = grid_origin_y - half_h
+    y_max = grid_origin_y + half_h
+    return x_min, x_max, y_min, y_max
+
+
+def _draw_panels(fig, axes, robot_x, robot_y, hit_x, hit_y,
+                 pgm_binned, x_min, x_max, y_min, y_max, title="Occupancy Map Verification"):
     grid_cmap = ListedColormap(["black", "gray", "white"])
-    # Bin the PGM into 3 levels
-    pgm_binned = np.zeros_like(pgm, dtype=np.uint8)
-    pgm_binned[pgm == 0]   = 0   # occupied
-    pgm_binned[pgm == 128] = 1   # unknown
-    pgm_binned[pgm == 255] = 2   # free
+    fig.suptitle(title, fontsize=14, fontweight="bold")
 
-    fig, axes = plt.subplots(1, 2, figsize=(18, 6))
-    fig.suptitle("Occupancy Map Verification", fontsize=14, fontweight="bold")
-
-    # Panel 1: Raw LIDAR data
     ax = axes[0]
     ax.set_title("Raw LIDAR Input")
     ax.scatter(hit_x, hit_y, s=0.3, c="red", alpha=0.4, label="Hits")
@@ -116,14 +133,49 @@ def make_figure(lidar_path: str, pgm_path: str):
     ax.set_xlabel("x (m)")
     ax.set_ylabel("y (m)")
 
-    # Panel 2: PGM occupancy grid
     ax = axes[1]
     ax.set_title("Occupancy Grid (PGM)")
+    # imshow with origin="upper" places row 0 at the top (y_max in world coords).
     ax.imshow(pgm_binned, cmap=grid_cmap, origin="upper",
               extent=[x_min, x_max, y_min, y_max])
     ax.set_aspect("equal")
     ax.set_xlabel("x (m)")
 
+
+def make_figure(lidar_path: str, pgm_path: str):
+    """Original figure: estimates PGM extents from LIDAR data (test dataset)."""
+    robot_x, robot_y, hit_x, hit_y = load_lidar(lidar_path)
+    pgm = load_pgm(pgm_path)
+    pgm_binned = _bin_pgm(pgm)
+    x_min, x_max, y_min, y_max = _pgm_extent_from_lidar(robot_x, robot_y, hit_x, hit_y)
+
+    fig, axes = plt.subplots(1, 2, figsize=(18, 6))
+    _draw_panels(fig, axes, robot_x, robot_y, hit_x, hit_y,
+                 pgm_binned, x_min, x_max, y_min, y_max)
+    plt.tight_layout()
+    return fig
+
+
+def make_figure_intel(lidar_path: str, pgm_path: str,
+                      grid_origin_x: float, grid_origin_y: float,
+                      resolution: float):
+    """
+    Figure for the Intel Research Lab dataset.
+
+    Uses exact grid origin + resolution to align the PGM with world coordinates
+    instead of approximating from LIDAR extents.  Pass the same origin and
+    resolution that were given to the occupancy_map_cuda binary.
+    """
+    robot_x, robot_y, hit_x, hit_y = load_lidar(lidar_path)
+    pgm = load_pgm(pgm_path)
+    pgm_binned = _bin_pgm(pgm)
+    x_min, x_max, y_min, y_max = _pgm_extent_from_grid(
+        pgm, grid_origin_x, grid_origin_y, resolution)
+
+    fig, axes = plt.subplots(1, 2, figsize=(18, 6))
+    _draw_panels(fig, axes, robot_x, robot_y, hit_x, hit_y,
+                 pgm_binned, x_min, x_max, y_min, y_max,
+                 title="Occupancy Map Verification (Intel Dataset)")
     plt.tight_layout()
     return fig
 
@@ -134,9 +186,20 @@ def main():
     parser.add_argument("pgm",   help="Path to occupancy grid .pgm file")
     parser.add_argument("--save", metavar="FILE",
                         help="Save figure to file instead of displaying")
+    parser.add_argument("--grid-origin", nargs=2, type=float, metavar=("CX", "CY"),
+                        help="World-frame centre of the occupancy grid (metres). "
+                             "Enables exact PGM alignment (use for Intel dataset).")
+    parser.add_argument("--resolution", type=float, default=None,
+                        help="Grid cell size in metres/cell (required with --grid-origin).")
     args = parser.parse_args()
 
-    fig = make_figure(args.lidar, args.pgm)
+    if args.grid_origin is not None:
+        if args.resolution is None:
+            parser.error("--resolution is required when --grid-origin is provided")
+        cx, cy = args.grid_origin
+        fig = make_figure_intel(args.lidar, args.pgm, cx, cy, args.resolution)
+    else:
+        fig = make_figure(args.lidar, args.pgm)
 
     if args.save:
         fig.savefig(args.save, dpi=150, bbox_inches="tight")

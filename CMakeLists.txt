@@ -13,6 +13,9 @@ target_compile_options(occupancy_map_cpu PRIVATE -O2 -Wall -Wextra)
 # Test data generator (for verifying the pipeline without the real dataset)
 add_executable(generate_test_data src/generate_test_data.cpp)
 target_compile_options(generate_test_data PRIVATE -O2)
+# File for combining intel data to look like test data
+add_executable(combine_intel_data src/combine_intel_data.cpp)
+target_compile_options(combine_intel_data PRIVATE -O2)
 
 # Phase 2: CUDA build
 enable_language(CUDA)
