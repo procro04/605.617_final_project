@@ -42,3 +42,6 @@
 
 # build folder
 build/**
+
+# ignore python environents
+.venv/
