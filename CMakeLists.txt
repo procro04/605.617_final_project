@@ -21,7 +21,12 @@ target_compile_options(combine_intel_data PRIVATE -O2)
 enable_language(CUDA)
 set(CMAKE_CUDA_STANDARD 17)
 
-add_executable(occupancy_map_cuda src/occupancy_map_cuda.cu)
+set(SOURCES
+    src/occupancy_map_cuda.cu
+    src/OccupanyGrid.cu
+    src/occupancy_kernels.cu)
+
+add_executable(occupancy_map_cuda ${SOURCES})
 target_compile_options(occupancy_map_cuda PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
     --expt-relaxed-constexpr
     -O2
