@@ -38,6 +38,7 @@
 #include "CodeTimer.h"
 #include "Common.h"
 #include "OccupanyGrid.h"
+#include "CudaHelpers.h"
 
 void print_usage(const char *prog)
 {
@@ -45,25 +46,6 @@ void print_usage(const char *prog)
               << " <lidar_data.txt> [grid_size_m] [resolution_m]\n"
               << "  grid_size_m   -- physical side length (default 40.0)\n"
               << "  resolution_m  -- meters per cell      (default 0.05)\n";
-}
-
-void print_cuda_device_info()
-{
-    int device_count = 0;
-    CUDA_CHECK(cudaGetDeviceCount(&device_count));
-    if (device_count == 0)
-    {
-        std::cerr << "No CUDA devices found!\n";
-        exit(EXIT_FAILURE);
-    }
-
-    cudaDeviceProp prop;
-    CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
-    std::cout << "CUDA Device: " << prop.name << "\n";
-    std::cout << "  Compute capability: " << prop.major << "." << prop.minor << "\n";
-    std::cout << "  SMs: " << prop.multiProcessorCount
-              << "  Max threads/block: " << prop.maxThreadsPerBlock << "\n";
-    std::cout << "  Global memory: " << (prop.totalGlobalMem >> 20) << " MB\n";
 }
 
 int main(int argc, char *argv[])
@@ -80,7 +62,7 @@ int main(int argc, char *argv[])
 
     std::vector<TimingRecord> timing_log;
 
-    // print_cuda_device_info();
+    print_cuda_device_info();
 
     std::vector<LidarScan> scans;
     {
