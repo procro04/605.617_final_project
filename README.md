@@ -25,13 +25,15 @@ cmake --build .
 # Getting Data
 - I plan to use the intel set here: https://github.com/1988kramer/intel_dataset/tree/master/data
 eventually but have started smaller with a simple c++ script for an easy test case
+    - No luck with this data set but left the code and data in case I return to it
 - Run `./generate_test_data > <your_file_name.txt>` to generate some simple input data
+- Run `./generate_test_data_hd > <your_file_name.txt>` for a higher quality, more complex map
+and scenario. Edit the file beam number to stress-test GPU scenarios.
 
 # Running Code
 - I have 2 instances of the code right now. `occupancy_map_cpu.cpp` and
-`occupancy_map_cuda.cu`. I plan to integrate these better so you can run
-each version from the same main file for easy speed comparisons however they are
-separate right now (with a lot of duplicate code)
+`occupancy_map_cuda.cu`. Original plan was to integrate these into 1 file but
+they are more easily maintained separetely.
 - Run: `./occupany_map_cpu <your_test_data.txt>` and it will run the CPU version
 of the code and output a .pgm file for the generated map.
 - Run: `./occupany_map_cuda <your_test_data.txt>` and it will run the GPU version
@@ -41,3 +43,5 @@ of the code and output a .pgm file for the generated map.
 - There is a python script `visualize_map.py` I am using to see if the generated
 .pgm file looks anything like the input data.
 - To view run: `python3 visualize_map.py <your_test_data.txt> <your_pgm_out.pgm>`
+- Can also view only the generated test data by leaving out the pgm.
+- Run `--help` for other options.
