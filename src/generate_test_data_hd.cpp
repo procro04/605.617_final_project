@@ -64,7 +64,8 @@ int main()
 
     const float max_range = 30.f;
     // const int num_beams = 16384;  // stress-test value: 16K beams fills ~64 CUDA blocks
-    const int num_beams = 40000;  // stress-test value: 16K beams fills ~64 CUDA blocks
+    // const int num_beams = 40000;  // stress-test value: 16K beams fills ~64 CUDA blocks
+    const int num_beams = 100000;  // stress-test value: 16K beams fills ~64 CUDA blocks
     const int num_scans = 100;
 
     for (int s = 0; s < num_scans; ++s)
