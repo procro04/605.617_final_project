@@ -62,7 +62,10 @@ OccupancyGrid::OccupancyGrid(float grid_size_meters, float resolution,
       resolution_(resolution),
       origin_x_(origin_x),
       origin_y_(origin_y),
-      d_grid_(nullptr)
+      d_grid_(nullptr),
+      d_hits_x_(nullptr),
+      d_hits_y_(nullptr),
+      hits_capacity_(0)
 {
     num_cells_ = static_cast<int>(std::ceil(grid_size_ / resolution_));
     size_t grid_bytes = static_cast<size_t>(num_cells_) * num_cells_ * sizeof(int8_t);
@@ -83,6 +86,12 @@ OccupancyGrid::~OccupancyGrid()
     {
         cudaFree(d_grid_);
         d_grid_ = nullptr;
+    }
+    if (d_hits_x_)
+    {
+        cudaFree(d_hits_x_);
+        cudaFree(d_hits_y_);
+        d_hits_x_ = d_hits_y_ = nullptr;
     }
 }
 
@@ -137,6 +146,21 @@ void OccupancyGrid::process_scan_cuda(const LidarScan &scan,
     if (num_hits == 0)
         return;
 
+    // Grow the persistent device hit buffers only when this scan is larger
+    // than any previous one.  cudaMalloc/cudaFree is called at most once per
+    // new high-water mark rather than every scan.
+    if (num_hits > hits_capacity_)
+    {
+        if (d_hits_x_)
+        {
+            CUDA_CHECK(cudaFree(d_hits_x_));
+            CUDA_CHECK(cudaFree(d_hits_y_));
+        }
+        CUDA_CHECK(cudaMalloc(&d_hits_x_, num_hits * sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&d_hits_y_, num_hits * sizeof(float)));
+        hits_capacity_ = num_hits;
+    }
+
     // Pack hit coordinates into flat arrays for the GPU.
     std::vector<float> hits_x(num_hits);
     std::vector<float> hits_y(num_hits);
@@ -146,53 +170,42 @@ void OccupancyGrid::process_scan_cuda(const LidarScan &scan,
         hits_y[i] = scan.hits[i].second;
     }
 
-    // Allocate device hit arrays.
-    float *d_hits_x = nullptr;
-    float *d_hits_y = nullptr;
     size_t hits_bytes = num_hits * sizeof(float);
-
-    CUDA_CHECK(cudaMalloc(&d_hits_x, hits_bytes));
-    CUDA_CHECK(cudaMalloc(&d_hits_y, hits_bytes));
 
     // Copy hits to device.
     {
         ScopedTimer t("  H2D hit data", timing_log);
-        CUDA_CHECK(cudaMemcpy(d_hits_x, hits_x.data(), hits_bytes,
+        CUDA_CHECK(cudaMemcpy(d_hits_x_, hits_x.data(), hits_bytes,
                               cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_hits_y, hits_y.data(), hits_bytes,
+        CUDA_CHECK(cudaMemcpy(d_hits_y_, hits_y.data(), hits_bytes,
                               cudaMemcpyHostToDevice));
     }
 
     int num_blocks = (num_hits + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-    // Kernel 1: mark endpoints OCCUPIED.
+    // Launch both kernels back-to-back on the default stream (stream 0).
+    // The stream guarantees kernel 2 starts only after kernel 1 finishes,
+    // so no intermediate sync is needed between them.  A single sync after
+    // both kernels is sufficient for timing and error checking.
     {
-        ScopedTimer t("  GPU endpoint marking", timing_log);
+        ScopedTimer t("  GPU kernels (mark+trace)", timing_log);
+
+        // Kernel 1: mark endpoints OCCUPIED (no atomics needed).
         mark_endpoints_kernel<<<num_blocks, BLOCK_SIZE>>>(
-            d_grid_, d_hits_x, d_hits_y,
+            d_grid_, d_hits_x_, d_hits_y_,
             num_hits, num_cells_, resolution_,
             origin_x_, origin_y_, grid_size_);
-        CUDA_CHECK(cudaDeviceSynchronize());
-    }
 
-    // Kernel 2: Bresenham ray tracing -- mark free space UNOCCUPIED.
-    // Uses atomicCAS (via atomic_set_if_unknown) so concurrent rays that
-    // cross the same cell are handled safely, and OCCUPIED endpoints are
-    // never overwritten.
-    {
-        ScopedTimer t("  GPU ray tracing", timing_log);
+        // Kernel 2: Bresenham ray tracing -- mark free space UNOCCUPIED.
         ray_trace_kernel<<<num_blocks, BLOCK_SIZE>>>(
             d_grid_,
             scan.pose.x, scan.pose.y,
-            d_hits_x, d_hits_y,
+            d_hits_x_, d_hits_y_,
             num_hits, num_cells_, resolution_,
             origin_x_, origin_y_, grid_size_);
+
         CUDA_CHECK(cudaDeviceSynchronize());
     }
-
-    // Free per-scan device allocations.
-    CUDA_CHECK(cudaFree(d_hits_x));
-    CUDA_CHECK(cudaFree(d_hits_y));
 }
 
 // Copy the device grid back to the host (call once after all scans).

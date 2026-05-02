@@ -63,4 +63,10 @@ private:
     // Device copy of the grid. Persists across scans; synced to host only
     // on demand via sync_from_device().
     int8_t *d_grid_;
+
+    // Pre-allocated device hit buffers. Grown on demand; never shrunk.
+    // Eliminates cudaMalloc/cudaFree overhead on every scan.
+    float *d_hits_x_;
+    float *d_hits_y_;
+    int    hits_capacity_;
 };
