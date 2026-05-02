@@ -6,7 +6,7 @@ from typing import List
 
 from time import sleep
 
-# from matplotlib import pyplot
+from matplotlib import pyplot
 from matplotlib.patches import Rectangle
 
 class MapType:
@@ -189,28 +189,28 @@ class QuadMap:
 
 		return grid
 
-	# def plot(self):
-	# 	"""
-	# 	A plot helper function. Much of the code is already in place but expects a working plot function for
-	# 	the QuadMapNode class. This function can be modified as necessary to work with your implementation.
+	def plot(self):
+		"""
+		A plot helper function. Much of the code is already in place but expects a working plot function for
+		the QuadMapNode class. This function can be modified as necessary to work with your implementation.
 
-	# 	Worth 10 pts
-	# 	"""
-	# 	# Initialize figure and axes if not already created
-	# 	if self.figure is None:
-	# 		self.figure = pyplot.figure(figsize=(15, 5))
-	# 		self.axis = [
-	# 			self.figure.add_subplot(1, 2, 1),  # Left subplot (row=1, col=2, index=1)
-	# 			self.figure.add_subplot(1, 2, 2)   # Right subplot (row=1, col=2, index=2)
-	# 		]
+		Worth 10 pts
+		"""
+		# Initialize figure and axes if not already created
+		if self.figure is None:
+			self.figure = pyplot.figure(figsize=(15, 5))
+			self.axis = [
+				self.figure.add_subplot(1, 2, 1),  # Left subplot (row=1, col=2, index=1)
+				self.figure.add_subplot(1, 2, 2)   # Right subplot (row=1, col=2, index=2)
+			]
 		
-	# 	grid = self.to_occupancygrid()
-	# 	pyplot.xlim([0, 10])
-	# 	pyplot.ylim([0, 10])
-	# 	self.root.plot_node(self.axis[1])
-	# 	self.axis[0].imshow(grid)
-	# 	pyplot.draw()
-	# 	pyplot.pause(0.0001)
+		grid = self.to_occupancygrid()
+		pyplot.xlim([0, 10])
+		pyplot.ylim([0, 10])
+		self.root.plot_node(self.axis[1])
+		self.axis[0].imshow(grid)
+		pyplot.draw()
+		pyplot.pause(0.0001)
 
 class QuadMapNode:
 	"""

@@ -185,11 +185,30 @@ def make_figure_intel(lidar_path: str, pgm_path: str,
     plt.tight_layout()
     return fig
 
+def make_figure_lidar_only(lidar_path: str):
+    """Figure for just LIDAR scan data — no PGM required."""
+    robot_x, robot_y, hit_x, hit_y = load_lidar(lidar_path)
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    fig.suptitle("Raw LIDAR Input", fontsize=14, fontweight="bold")
+
+    ax.scatter(hit_x, hit_y, s=0.3, c="red", alpha=0.4, label="Hits")
+    ax.plot(robot_x, robot_y, "-o", color="blue", markersize=3,
+            linewidth=1, alpha=0.7, label="Robot path")
+    ax.set_aspect("equal")
+    ax.legend(loc="upper right", fontsize=8)
+    ax.set_xlabel("x (m)")
+    ax.set_ylabel("y (m)")
+    plt.tight_layout()
+    return fig
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Overlay LIDAR data on occupancy grid PGM for verification.")
+        description="Visualize LIDAR scan data, optionally overlaid on an occupancy grid PGM.")
     parser.add_argument("lidar", help="Path to LIDAR scan text file")
-    parser.add_argument("pgm",   help="Path to occupancy grid .pgm file")
+    parser.add_argument("pgm", nargs="?", default=None,
+                        help="Path to occupancy grid .pgm file (optional)")
     parser.add_argument("--save", metavar="FILE",
                         help="Save figure to file instead of displaying")
     parser.add_argument("--grid-origin", nargs=2, type=float, metavar=("CX", "CY"),
@@ -199,7 +218,9 @@ def main():
                         help="Grid cell size in metres/cell (default 0.05, required with --grid-origin).")
     args = parser.parse_args()
 
-    if args.grid_origin is not None:
+    if args.pgm is None:
+        fig = make_figure_lidar_only(args.lidar)
+    elif args.grid_origin is not None:
         cx, cy = args.grid_origin
         fig = make_figure_intel(args.lidar, args.pgm, cx, cy, args.resolution)
     else:

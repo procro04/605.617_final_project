@@ -261,8 +261,12 @@ private:
     static void bresenham_ray(int8_t *grid, int width,
                               int c0, int r0, int c1, int r1)
     {
+        // delta column, delta row
         int dc = std::abs(c1 - c0);
         int dr = std::abs(r1 - r0);
+        // step column, step row
+        // Figure out which way we need to step based on our start and end
+        // coordinates
         int sc = (c0 < c1) ? 1 : -1;
         int sr = (r0 < r1) ? 1 : -1;
         int err = dc - dr;
@@ -281,12 +285,15 @@ private:
             // All intermediate cells are free space.
             grid[r * width + c] = UNOCCUPIED;
 
+            // Multiply error by 2 to keep easy integer math
             int e2 = 2 * err;
+            // Adjust x and error
             if (e2 > -dr)
             {
                 err -= dr;
                 c += sc;
             }
+            // Adjust y and error
             if (e2 < dc)
             {
                 err += dc;
