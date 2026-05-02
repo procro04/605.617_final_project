@@ -149,8 +149,7 @@ int main(int argc, char *argv[])
         // Accumulate per-stage totals across all scans for the breakdown.
         double total_scan_ms = 0.0;
         double total_h2d_hits_ms = 0.0;
-        double total_gpu_mark_ms = 0.0;
-        double total_gpu_ray_ms = 0.0;
+        double total_gpu_kernels_ms = 0.0;
 
         for (const auto &r : timing_log)
         {
@@ -158,10 +157,8 @@ int main(int argc, char *argv[])
                 total_scan_ms += r.elapsed_ms;
             else if (r.label == "  H2D hit data")
                 total_h2d_hits_ms += r.elapsed_ms;
-            else if (r.label == "  GPU endpoint marking")
-                total_gpu_mark_ms += r.elapsed_ms;
-            else if (r.label == "  GPU ray tracing")
-                total_gpu_ray_ms += r.elapsed_ms;
+            else if (r.label == "  GPU kernels (mark+trace)")
+                total_gpu_kernels_ms += r.elapsed_ms;
         }
 
         // Print high-level timings first.
@@ -180,8 +177,7 @@ int main(int argc, char *argv[])
         timing_report << "\n--- Per-stage totals (summed across all scans) ---\n";
 
         print_timing_line(timing_report, "H2D hit data (total)", total_h2d_hits_ms);
-        print_timing_line(timing_report, "GPU endpoint marking (total)", total_gpu_mark_ms);
-        print_timing_line(timing_report, "GPU ray tracing (total)", total_gpu_ray_ms);
+        print_timing_line(timing_report, "GPU kernels mark+trace (total)", total_gpu_kernels_ms);
 
         // Per-scan average.
         if (!scans.empty())
